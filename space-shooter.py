@@ -11,8 +11,11 @@ def idebug(*args):
 
 
 def debug(*args):
-    return
+    # return
     print(*args, file=sys.stderr, flush=True)
+
+BORDER = 300
+WIDTH, HEIGHT = 1700, 1080
 
 # Move your ship, fire, win!
 
@@ -30,14 +33,29 @@ class Unit:
         self.velocity = array([self.vx, self.vy])
         self.gun_cooldown = gun_cooldown
 
+        self.speed = numpy.linalg.norm(self.velocity)
         self.target = None  # type: Entity
 
     def distance(self, unit):
         return numpy.linalg.norm(self.location - unit.location)
 
+    def change_direction(self):
+        x, y = self.location
+        if y > BORDER and abs(HEIGHT - y) > BORDER:
+            if x < BORDER or abs(WIDTH - x) < BORDER:
+                return array([-self.vx, self.vy])
+            else:
+                return self.velocity
+        else:
+            if x > BORDER and abs(WIDTH - x) > BORDER:
+                return array([self.vx, -self.vy])
+            else:
+                return array([-self.vx, -self.vy])
+
+
     def __repr__(self):
         team = 'me' if self.faction == 1 else 'op'
-        return f'{self.unit_id} {team} {self.unit_type} h: {self.health} p: {self.location} v: {self.velocity} gun: {self.gun_cooldown}'
+        return f'{self.unit_id} {team} {self.unit_type} h: {self.health} speed: {self.speed} p: {self.location} v: {self.velocity} gun: {self.gun_cooldown}'
 
 missiles_count = 8
 
@@ -82,21 +100,33 @@ while True:
     if closest_bullet:
         debug(f'closest bullet: {closest_bullet.distance(my_ship)}')
 
-    if closest_bullet and closest_bullet.distance(my_ship) < 300:
+    near_border = lambda x, y: x < BORDER or abs(WIDTH - x) < BORDER or y < BORDER or abs(HEIGHT - y) < BORDER
+
+    if near_border(*my_ship.location) and my_ship.speed > 0:
+        thrust = 10
+        new_direction = my_ship.change_direction()
+        norm = numpy.linalg.norm(new_direction)
+        vector = new_direction / norm * thrust
+        debug(f'DANGER BORDER!! changing speed from {my_ship.velocity} to {vector}')
+        x, y = vector
+        action = f'A {x} {y}'
+        actions.append(action)
+    elif closest_bullet and closest_bullet.distance(my_ship) < 700:
         _dir = closest_bullet.location - my_ship.location
         norm = numpy.linalg.norm(_dir)
-        vector = -my_ship.velocity
+        # vector = -my_ship.velocity
+        vector = enemy_ship.velocity
         x, y = vector
         action = f'A {x} {y}'
         actions.append(action)
-    elif my_ship.distance(enemy_ship) > 800:
-        thrust = 6
-        direction = enemy_ship.location - my_ship.location
-        norm = numpy.linalg.norm(direction)
-        vector = direction / norm * thrust
-        x, y = vector
-        action = f'A {x} {y}'
-        actions.append(action)
+    # elif my_ship.distance(enemy_ship) > 1000:
+    #     thrust = 6
+    #     direction = enemy_ship.location - my_ship.location
+    #     norm = numpy.linalg.norm(direction)
+    #     vector = direction / norm * thrust
+    #     x, y = vector
+    #     action = f'A {x} {y}'
+    #     actions.append(action)
 
     # Infinite bullets
     thrust = 100
@@ -108,7 +138,49 @@ while True:
     actions.append(action)
 
     # Only 8 missiles
-    if missiles_count:
+    missiles = [u for u in units if u.unit_type == 'M']
+    my_missiles = [u for u in units if u.faction == 1 and u.unit_type == 'M']
+    enemy_missiles = [u for u in units if u.faction == -1 and u.unit_type == 'M']
+    closest_my_missile = min(my_missiles, key=lambda b: b.distance(my_ship)) if my_missiles else None
+    farthest_my_missile = max(my_missiles, key=lambda b: b.distance(my_ship)) if my_missiles else None
+    closest_enemy_missile = min(enemy_missiles, key=lambda b: b.distance(my_ship)) if enemy_missiles else None
+    closest_missile = min(missiles, key=lambda b: b.distance(my_ship)) if missiles else None
+
+    closest_enemy_bullet = min(enemy_bullets, key=lambda b: b.distance(farthest_my_missile)) if farthest_my_missile and enemy_bullets else None
+
+    # can_launch_missile = closest_my_missile is not None and closest_my_missile.distance(my_ship) > 400
+    # can_launch_missile |= closest_enemy_missile is not None and closest_enemy_missile.distance(my_ship) > 600
+    # can_launch_missile &= missiles_count and closest_missile is not None
+    
+    # can_launch_missile = closest_enemy_bullet is not None and farthest_my_missile.distance(closest_enemy_bullet) > 240
+    # can_launch_missile &= closest_enemy_missile is not None and farthest_my_missile.distance(closest_enemy_missile) > 400
+    # can_launch_missile &= closest_my_missile is not None and closest_my_missile.distance(my_ship) > 400
+    # can_launch_missile |= missiles_count and closest_missile is None 
+
+
+    if closest_enemy_bullet is not None and farthest_my_missile.distance(closest_enemy_bullet) > 240:
+        can_launch_missile = True
+    else:
+        can_launch_missile = False
+
+    debug(f'closest_my_missile: {closest_my_missile}')
+    debug(f'closest_enemy_missile: {closest_enemy_missile}')
+    debug(f'farthest_my_missile: {farthest_my_missile}')
+    
+    if closest_enemy_missile and farthest_my_missile and farthest_my_missile.distance(closest_enemy_missile) > 400:
+        can_launch_missile = True
+    else:
+        can_launch_missile = False
+
+    if closest_my_missile is not None and closest_my_missile.distance(my_ship) > 400:
+        can_launch_missile = True 
+    else:
+        can_launch_missile = False
+
+    if not can_launch_missile:
+        can_launch_missile = missiles_count and closest_missile is None 
+
+    if can_launch_missile:
         thrust = 30
         vector = direction / norm * thrust
         x, y = vector
@@ -118,9 +190,8 @@ while True:
 
     print(' | '.join(actions))
 
-    missiles = [u for u in units if u.faction == 1 and u.unit_type == 'M']
-    if missiles:
-        for m in missiles:
+    if my_missiles:
+        for m in my_missiles:
             if m.distance(enemy_ship) > 10:
                 thrust = 30
                 direction = enemy_ship.location - m.location
